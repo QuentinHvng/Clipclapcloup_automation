@@ -548,11 +548,19 @@ Copy caption</button></div>
 
 
 def serve(port: int = SERVER_PORT) -> ThreadingHTTPServer:
-    """Start the server on a background thread and return it."""
+    """Start the server on a background thread and return it.
+
+    We ask for every interface so a phone can fetch a clip, but a firewall or
+    security suite may refuse that. Rather than failing to start, fall back to
+    loopback: everything works except sending clips to a phone."""
     import threading
 
     mimetypes.add_type("text/javascript", ".js")
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 - see module docstring
+    try:
+        httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 - see module docstring
+    except OSError:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, daemon=True, name="http").start()
     return httpd
