@@ -107,6 +107,7 @@ def create_clips(job, url: str, options: dict) -> dict:
         # -- 3. find the liveliest stretch -----------------------------
         scale = phase_scaler(*STAGE_BOUNDS["analyze"])
         job.update(phase="analyze", detail="Listening for the liveliest moment…")
+        job.say("Analysing the audio…")
         source_duration = meta.get("duration") or 0
         usable = source_duration or part_duration * max(parts, 1)
         parts, per_part = _plan_parts(usable, parts, part_duration, overlap)
@@ -149,6 +150,7 @@ def create_clips(job, url: str, options: dict) -> dict:
                 detail=f"Cutting clip {index + 1} of {parts}…" if parts > 1 else "Cutting the clip…",
                 percent=slice_start,
             )
+            job.say(f"Cutting {name} ({to_timecode(part_start)} → {to_timecode(part_end)}, {mode})")
             cut_clip(
                 source,
                 part_start,

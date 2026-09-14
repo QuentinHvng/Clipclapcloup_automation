@@ -10,6 +10,7 @@ stdout stays untouched so callers can pipe raw audio out of it.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,14 @@ def has_ffmpeg() -> bool:
         return False
 
 
+# A -progress line is always a bare lowercase key followed by '='. Real
+# messages never match that: they start with '[', a capital, or a path. This
+# distinction matters more than it looks — telling them apart by "contains an
+# equals sign" quietly throws away every error that quotes a filter argument,
+# which is most of the interesting ones.
+_PROGRESS_LINE = re.compile(r"^[a-z_]+=")
+
+
 def _parse_progress_line(line: str) -> float | None:
     """Return the position in seconds from an ffmpeg -progress line, if any.
     Both out_time_us and the older out_time_ms are microseconds despite the
@@ -87,7 +96,7 @@ def run_ffmpeg(
         "-nostdin",
         "-y",
         "-nostats",
-        "-loglevel", "error",
+        "-loglevel", "warning",
         "-progress", "pipe:2",
         *args,
     ]
@@ -105,18 +114,18 @@ def run_ffmpeg(
             line = raw.decode("utf-8", "replace").strip()
             if not line:
                 continue
-            position = _parse_progress_line(line)
-            if position is not None:
-                if on_progress and duration:
+            if _PROGRESS_LINE.match(line):
+                position = _parse_progress_line(line)
+                if position is not None and on_progress and duration:
                     percent = max(0.0, min(100.0, position / duration * 100))
                     try:
                         on_progress(percent)
                     except Exception:  # noqa: BLE001 - a UI hiccup must not kill the encode
                         pass
-            elif "=" not in line:
-                # real log output rather than a progress key/value pair
-                errors.append(line)
-                del errors[:-40]
+                continue
+            # anything else is ffmpeg talking to us
+            errors.append(line)
+            del errors[:-60]
 
     watcher = threading.Thread(target=watch_stderr, daemon=True)
     watcher.start()
@@ -131,8 +140,16 @@ def run_ffmpeg(
     watcher.join(timeout=5)
 
     if proc.returncode != 0:
-        detail = "\n".join(errors[-12:]) or "no error output"
-        raise RuntimeError(f"ffmpeg failed:\n{detail}")
+        detail = "\n".join(errors[-14:])
+        if not detail:
+            # Nothing on stderr and a non-zero exit usually means it was killed
+            # from outside rather than that it disagreed with its arguments.
+            detail = (
+                f"it exited with code {proc.returncode} without saying anything, "
+                "which usually means something stopped it — antivirus, or the "
+                "machine running out of disk space."
+            )
+        raise RuntimeError(f"ffmpeg failed: {detail}")
 
     if on_progress and duration:
         try:

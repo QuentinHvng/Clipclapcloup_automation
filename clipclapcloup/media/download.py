@@ -165,13 +165,22 @@ def download_source(
             seen.clear()
             continue
 
-        candidates = sorted(
+        # Prefer the merged container. Video and audio arrive as separate
+        # files named source.f137.mp4 and the like; if a merge went wrong one
+        # of those can survive, and picking it would hand the next stage a
+        # clip with no sound.
+        merged = [dest_dir / f"source.{ext}" for ext in ("mp4", "mkv", "webm")]
+        for candidate in merged:
+            if candidate.exists():
+                return candidate
+
+        leftovers = sorted(
             (p for p in dest_dir.glob("source.*") if p.suffix.lower() != ".part"),
             key=lambda p: p.stat().st_size,
             reverse=True,
         )
-        if candidates:
-            return candidates[0]
+        if leftovers:
+            return leftovers[0]
         last_error = RuntimeError("the download finished but produced no video file")
 
     raise _explain(last_error or RuntimeError("unknown failure"), settings)
