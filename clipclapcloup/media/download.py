@@ -27,16 +27,35 @@ FORMAT = "bv*[height<=1080]+ba/b[height<=1080]"
 CLIENTS_ANONYMOUS = ["tv", "web_safari"]
 CLIENTS_WITH_COOKIES = ["web_safari"]
 
-BOT_CHECK_HINTS = ("not a bot", "sign in to confirm", "cookies")
+BOT_CHECK_HINTS = ("not a bot", "sign in to confirm")
+
+# Reading a browser's cookie jar fails in its own distinctive ways, and those
+# say nothing about YouTube. Chrome and Edge encrypt theirs with a scheme
+# yt-dlp cannot open on Windows, and they hold the database open while running.
+COOKIE_PROBLEM_HINTS = (
+    "dpapi",
+    "decrypt",
+    "could not copy",
+    "cookie database",
+    "permission denied",
+    "no such file",
+    "could not find",
+)
 
 
 class DownloadError(RuntimeError):
     pass
 
 
-def _looks_like_a_bot_check(error: Exception) -> bool:
+def _mentions(error: Exception | None, hints) -> bool:
+    if error is None:
+        return False
     message = str(error).lower()
-    return any(hint in message for hint in BOT_CHECK_HINTS)
+    return any(hint in message for hint in hints)
+
+
+def _looks_like_a_bot_check(error: Exception | None) -> bool:
+    return _mentions(error, BOT_CHECK_HINTS)
 
 
 def _options(settings: dict | None, with_cookies: bool) -> dict:
@@ -66,36 +85,62 @@ def _attempts(settings: dict | None) -> list[bool]:
     return [False, True] if browser else [False]
 
 
-def _explain(error: Exception, settings: dict | None) -> DownloadError:
-    if _looks_like_a_bot_check(error):
-        if ((settings or {}).get("cookies_browser") or "").strip():
-            return DownloadError(
-                "YouTube refused the download even with your browser cookies. "
-                "Wait a few minutes and try again — and check you are signed in to "
-                "YouTube in that browser."
-            )
+def _explain(
+    anonymous_error: Exception | None,
+    cookie_error: Exception | None,
+    settings: dict | None,
+) -> DownloadError:
+    """Turn whichever attempts failed into one sentence worth reading.
+
+    The cookie attempt runs second, so its error is the most recent — but if it
+    failed because the cookie jar itself could not be opened, that has nothing
+    to do with the video, and reporting it alone hides what YouTube actually
+    said."""
+    browser = ((settings or {}).get("cookies_browser") or "").strip()
+
+    if _mentions(cookie_error, COOKIE_PROBLEM_HINTS):
+        aside = ""
+        if _looks_like_a_bot_check(anonymous_error):
+            aside = " Without cookies, YouTube asked to confirm you're not a bot."
+        elif anonymous_error is not None:
+            aside = f" Without cookies it failed too: {anonymous_error}"
         return DownloadError(
-            "YouTube is asking to confirm you're not a bot. Open Settings and pick the "
-            "browser you watch YouTube in, so the app can borrow its session."
+            f"The app could not read {browser or 'that browser'}'s cookies. Chrome and Edge "
+            "encrypt them in a way this cannot open on Windows, and they keep the file locked "
+            "while running. In Settings, either switch to Firefox or set it back to no browser."
+            + aside
         )
-    return DownloadError(f"Could not read that video: {error}")
+
+    if _looks_like_a_bot_check(cookie_error):
+        return DownloadError(
+            "YouTube refused the download even with your browser cookies. Wait a few minutes "
+            "and try again, and check you are signed in to YouTube in that browser."
+        )
+
+    if _looks_like_a_bot_check(anonymous_error) and not browser:
+        return DownloadError(
+            "YouTube is asking to confirm you're not a bot. Try again in a few minutes — and if "
+            "it keeps happening, open Settings and point the app at Firefox to borrow its session."
+        )
+
+    return DownloadError(f"Could not read that video: {cookie_error or anonymous_error}")
 
 
 def fetch_metadata(url: str, settings: dict | None = None) -> dict:
     """Title, description and tags of the source video, without downloading
     it — used to name the folder and draft captions."""
-    last_error: Exception | None = None
+    failures: dict[bool, Exception] = {}
 
     for with_cookies in _attempts(settings):
         try:
             with yt_dlp.YoutubeDL(_options(settings, with_cookies)) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as exc:  # noqa: BLE001 - yt-dlp raises a wide range of errors
-            last_error = exc
+            failures[with_cookies] = exc
             continue
 
         if info is None:
-            last_error = RuntimeError("no video information came back")
+            failures[with_cookies] = RuntimeError("no video information came back")
             continue
 
         return {
@@ -107,7 +152,7 @@ def fetch_metadata(url: str, settings: dict | None = None) -> dict:
             "uploader": info.get("uploader") or "",
         }
 
-    raise _explain(last_error or RuntimeError("unknown failure"), settings)
+    raise _explain(failures.get(False), failures.get(True), settings)
 
 
 def download_source(
@@ -146,7 +191,7 @@ def download_source(
         except Exception:  # noqa: BLE001
             pass
 
-    last_error: Exception | None = None
+    failures: dict[bool, Exception] = {}
     for with_cookies in _attempts(settings):
         options = {
             **_options(settings, with_cookies),
@@ -161,7 +206,7 @@ def download_source(
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([url])
         except Exception as exc:  # noqa: BLE001
-            last_error = exc
+            failures[with_cookies] = exc
             seen.clear()
             continue
 
@@ -181,6 +226,6 @@ def download_source(
         )
         if leftovers:
             return leftovers[0]
-        last_error = RuntimeError("the download finished but produced no video file")
+        failures[with_cookies] = RuntimeError("the download finished but produced no video file")
 
-    raise _explain(last_error or RuntimeError("unknown failure"), settings)
+    raise _explain(failures.get(False), failures.get(True), settings)
