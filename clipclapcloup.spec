@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller recipe: one self-contained ClipClapCloup.exe.
+"""PyInstaller recipe for ClipClapCloup, in either shape.
+
+Set CCC_ONEFILE=0 to build the folder version instead of the single file.
+The two exist for one reason: antivirus engines treat a self-extracting
+single executable with far more suspicion than a plain folder of files.
 
 ffmpeg is expected at bin/ffmpeg.exe before building — the CI workflow
 downloads it. Building locally, drop a Windows ffmpeg.exe there yourself.
 """
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
+
+ONEFILE = os.environ.get("CCC_ONEFILE", "1") != "0"
 
 def collect_safely(package):
     """collect_all for a package that may legitimately be absent (the
@@ -67,18 +74,36 @@ analysis = Analysis(
 
 pyz = PYZ(analysis.pure)
 
-exe = EXE(
-    pyz,
-    analysis.scripts,
-    analysis.binaries,
-    analysis.datas,
-    [],
+common = dict(
     name="ClipClapCloup",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    runtime_tmpdir=None,
     console=False,
     icon="assets/icon.ico",
 )
+
+if ONEFILE:
+    # Everything in one file. Convenient to hand over, but the self-extracting
+    # stub is the same shape packers use, so antivirus engines flag it far more
+    # often — hence the folder build below as an alternative.
+    exe = EXE(
+        pyz,
+        analysis.scripts,
+        analysis.binaries,
+        analysis.datas,
+        [],
+        runtime_tmpdir=None,
+        **common,
+    )
+else:
+    exe = EXE(pyz, analysis.scripts, [], exclude_binaries=True, **common)
+    collected = COLLECT(
+        exe,
+        analysis.binaries,
+        analysis.datas,
+        strip=False,
+        upx=False,
+        name="ClipClapCloup",
+    )

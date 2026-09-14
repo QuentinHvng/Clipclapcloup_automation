@@ -36,31 +36,61 @@ jobs:
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           $binary = Get-ChildItem -Path ffmpeg-tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           Copy-Item $binary.FullName bin\ffmpeg.exe
-          "ffmpeg is $((Get-Item bin\ffmpeg.exe).Length / 1MB) MB"
+          "ffmpeg is $([math]::Round((Get-Item bin\ffmpeg.exe).Length / 1MB)) MB"
 
-      - name: Build
-        run: pyinstaller --noconfirm clipclapcloup.spec
+      # Two shapes of the same app. The single file is the easy one to hand
+      # over; the folder is the one antivirus engines leave alone, because it
+      # has no self-extracting stub.
+      - name: Build the single file
+        env:
+          CCC_ONEFILE: "1"
+        run: pyinstaller --noconfirm --distpath dist-onefile --workpath build-onefile clipclapcloup.spec
 
-      - name: Check the executable exists
+      - name: Build the folder version
+        env:
+          CCC_ONEFILE: "0"
+        run: pyinstaller --noconfirm --distpath dist-folder --workpath build-folder clipclapcloup.spec
+
+      - name: Package and check both
         shell: pwsh
         run: |
-          if (-not (Test-Path dist\ClipClapCloup.exe)) { throw "the build produced no executable" }
-          "built $((Get-Item dist\ClipClapCloup.exe).Length / 1MB) MB"
+          if (-not (Test-Path dist-onefile\ClipClapCloup.exe)) { throw "the single-file build produced no executable" }
+          if (-not (Test-Path dist-folder\ClipClapCloup\ClipClapCloup.exe)) { throw "the folder build produced no executable" }
+          Compress-Archive -Path dist-folder\ClipClapCloup -DestinationPath ClipClapCloup-folder.zip -Force
+          "single file: $([math]::Round((Get-Item dist-onefile\ClipClapCloup.exe).Length / 1MB)) MB"
+          "folder zip:  $([math]::Round((Get-Item ClipClapCloup-folder.zip).Length / 1MB)) MB"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ClipClapCloup-windows
-          path: dist/ClipClapCloup.exe
+          path: |
+            dist-onefile/ClipClapCloup.exe
+            ClipClapCloup-folder.zip
           retention-days: 30
 
       - name: Publish a release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ClipClapCloup.exe
+          files: |
+            dist-onefile/ClipClapCloup.exe
+            ClipClapCloup-folder.zip
           generate_release_notes: true
           body: |
-            Download `ClipClapCloup.exe` below and run it — nothing to install.
+            ## Download
 
-            Windows SmartScreen will warn about an unknown publisher the first time,
-            because the app is not code-signed. Choose "More info" then "Run anyway".
+            **`ClipClapCloup.exe`** — one file, nothing to install. Start here.
+
+            **`ClipClapCloup-folder.zip`** — the same app as a folder. Use this one
+            if your antivirus blocks the single file: unzip it anywhere and run
+            `ClipClapCloup.exe` from inside the folder, keeping the files next to it.
+
+            ## If it closes on its own after a few seconds
+
+            That is your antivirus, not a crash. The app is not code-signed and it
+            opens a local network port so your phone can pick up clips, which some
+            security suites treat as suspicious on sight. Either add an exclusion for
+            it, or use the folder version above, which is flagged far less often.
+
+            Windows also warns about an unknown publisher the first time — choose
+            "More info" then "Run anyway".
