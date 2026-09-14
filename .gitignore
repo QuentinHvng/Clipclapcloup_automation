@@ -1,0 +1,16 @@
+# build output
+build/
+dist/
+bin/
+*.pyc
+__pycache__/
+
+# ffmpeg is fetched at build time, never committed
+ffmpeg.zip
+ffmpeg-tmp/
+
+# local environments
+.venv/
+venv/
+.idea/
+.vscode/

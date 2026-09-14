@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipClapCloup</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<div id="onboarding" class="overlay" hidden>
+  <div class="wizard">
+    <div class="wizard-body" id="wizard-body"></div>
+    <div class="wizard-footer">
+      <span class="wizard-dots" id="wizard-dots"></span>
+      <div class="wizard-actions">
+        <button class="ghost" id="wizard-back">Back</button>
+        <button class="primary" id="wizard-next">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="shell">
+  <nav class="rail">
+    <div class="brand">
+      <span class="brand-mark">CC</span>
+      <span class="brand-name">ClipClapCloup</span>
+    </div>
+    <button class="nav-item active" data-view="create">
+      <span class="nav-label">New clips</span>
+    </button>
+    <button class="nav-item" data-view="library">
+      <span class="nav-label">Ready to post</span>
+      <span class="badge-count" id="count-pending" hidden>0</span>
+    </button>
+    <button class="nav-item" data-view="posted">
+      <span class="nav-label">Posted</span>
+    </button>
+    <div class="rail-spacer"></div>
+    <button class="nav-item" data-view="settings">
+      <span class="nav-label">Settings</span>
+    </button>
+  </nav>
+
+  <main class="content">
+
+    <!-- ── New clips ─────────────────────────────────────────── -->
+    <section class="view active" id="view-create">
+      <header class="view-head">
+        <h1>Turn a video into clips</h1>
+        <p>Paste a YouTube link. The app finds the liveliest stretch, cuts it into vertical clips and drafts a caption for each one.</p>
+      </header>
+
+      <div class="card">
+        <label class="field">
+          <span class="field-label">YouTube link</span>
+          <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false">
+        </label>
+
+        <div class="inline-fields">
+          <label class="field">
+            <span class="field-label">Clips</span>
+            <select id="parts">
+              <option value="1">1 clip</option>
+              <option value="2">2 parts</option>
+              <option value="3" selected>3 parts</option>
+              <option value="4">4 parts</option>
+              <option value="5">5 parts</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Length each</span>
+            <select id="part-duration">
+              <option value="30">30 seconds</option>
+              <option value="45">45 seconds</option>
+              <option value="60">60 seconds</option>
+              <option value="70" selected>70 seconds</option>
+              <option value="90">90 seconds</option>
+            </select>
+          </label>
+        </div>
+
+        <details class="advanced">
+          <summary>Advanced options</summary>
+          <div class="advanced-body">
+            <label class="field">
+              <span class="field-label">Framing</span>
+              <select id="mode">
+                <option value="blur-pad">Keep the whole frame, blurred background</option>
+                <option value="crop">Crop tight to the centre</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Overlap between parts</span>
+              <select id="overlap">
+                <option value="0">None</option>
+                <option value="3">3 seconds</option>
+                <option value="5" selected>5 seconds</option>
+                <option value="8">8 seconds</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Text burned on the clip <span class="field-hint">optional</span></span>
+              <input type="text" id="hook-text" placeholder="e.g. You won't believe this 😱" autocomplete="off">
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="burn-part-label" checked>
+              <span>Show “Part 1/3” on each clip</span>
+            </label>
+          </div>
+        </details>
+
+        <div class="row">
+          <button class="primary big" id="btn-cut">Make the clips</button>
+        </div>
+
+        <div class="progress" id="cut-progress" hidden>
+          <div class="progress-head">
+            <span id="cut-phase">Starting…</span>
+            <span id="cut-percent" class="tabular">0%</span>
+          </div>
+          <div class="bar"><div class="bar-fill" id="cut-bar"></div></div>
+          <p class="progress-note" id="cut-note">The full video is downloaded first, so the first stage is the longest.</p>
+        </div>
+
+        <p class="status" id="cut-status"></p>
+        <details class="log" id="cut-log" hidden>
+          <summary>Details</summary>
+          <pre id="cut-log-text"></pre>
+        </details>
+      </div>
+    </section>
+
+    <!-- ── Ready to post ─────────────────────────────────────── -->
+    <section class="view" id="view-library">
+      <header class="view-head">
+        <h1>Ready to post</h1>
+        <p>Every clip that hasn't gone out yet. Check it, adjust the caption, then send it to your phone or post it through the API.</p>
+      </header>
+      <div id="library-list"></div>
+    </section>
+
+    <!-- ── Posted ────────────────────────────────────────────── -->
+    <section class="view" id="view-posted">
+      <header class="view-head">
+        <h1>Posted</h1>
+        <p>What has already gone out. If you delete a video on TikTok, put it back in the queue here.</p>
+      </header>
+      <div id="posted-list"></div>
+    </section>
+
+    <!-- ── Settings ──────────────────────────────────────────── -->
+    <section class="view" id="view-settings">
+      <header class="view-head">
+        <h1>Settings</h1>
+      </header>
+
+      <div class="card">
+        <h2>Clips</h2>
+        <label class="field">
+          <span class="field-label">Saved to</span>
+          <div class="path-row">
+            <input type="text" id="set-clips-dir" spellcheck="false">
+            <button class="ghost" id="btn-open-clips">Open</button>
+          </div>
+        </label>
+        <label class="field">
+          <span class="field-label">Caption language</span>
+          <select id="set-caption-language">
+            <option value="en">English</option>
+            <option value="fr">French</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="card" id="tiktok-card">
+        <div class="card-head">
+          <h2>TikTok account</h2>
+          <span class="pill" id="tiktok-pill">Not connected</span>
+        </div>
+        <p class="muted">
+          Optional. You can use this app without it — cut your clips, send them to your phone and post them
+          from the TikTok app like you normally would.
+        </p>
+        <div class="callout">
+          <strong>Before you set this up:</strong> until TikTok reviews and approves your own developer app,
+          everything posted through the API lands as <em>private, visible only to you</em>. That is TikTok's rule
+          for unaudited apps, not a setting this app can change. Posting by hand has no such limit.
+        </div>
+        <div id="tiktok-steps"></div>
+      </div>
+
+      <div class="card">
+        <h2>AI captions</h2>
+        <p class="muted">
+          Optional. With an Anthropic API key, each clip gets a written caption instead of the default one built
+          from the video title. It uses your own key and your own credits — a few clips cost a fraction of a cent.
+        </p>
+        <label class="field">
+          <span class="field-label">Anthropic API key <span class="field-hint" id="anthropic-state"></span></span>
+          <input type="password" id="set-anthropic-key" placeholder="sk-ant-…" autocomplete="off">
+        </label>
+        <div class="row">
+          <button class="ghost" id="btn-save-anthropic">Save key</button>
+        </div>
+      </div>
+
+      <p class="footnote">
+        Settings and sign-in tokens are stored in your user folder on this computer, in plain files.
+        Anyone with access to your Windows account can read them.
+        <span id="version-line"></span>
+      </p>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<div class="overlay" id="share-modal" hidden>
+  <div class="modal">
+    <button class="modal-close" id="share-close">×</button>
+    <h2>Send to your phone</h2>
+    <p class="muted">Scan this with your phone's camera. It must be on the same Wi-Fi as this computer.</p>
+    <img id="share-qr" alt="QR code linking to the clip" width="220" height="220">
+    <p class="share-url" id="share-url"></p>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
