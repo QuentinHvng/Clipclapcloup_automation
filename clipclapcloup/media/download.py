@@ -3,12 +3,12 @@
 Calling it in-process gets us exact progress numbers through its own hooks —
 no parsing of console output — and one less binary to ship.
 
-YouTube decides how much to trust a request partly from which of its own
-clients we claim to be. The default web client now demands a token that only
-real browser JavaScript can mint, which is what the "confirm you're not a bot"
-wall is; the TV client is held to a much lower bar and works without any
-account. So we ask as the TV client first, and only fall back to browser
-cookies if the user has pointed us at a browser in the settings.
+How much YouTube trusts a request depends partly on which of its own clients
+we claim to be, and which ones work changes every few months. Betting on a
+single one is how you end up broken; so we try a short list in order, keep
+what yt-dlp decides on its own first, and fall back to browser cookies only
+if the user has pointed us at a browser. Every attempt is announced, so the
+job log shows which one got through.
 """
 from __future__ import annotations
 
@@ -20,12 +20,6 @@ from .ffmpeg import ffmpeg_dir
 
 # 1080p is plenty for a 9:16 export and downloads far faster than 4K.
 FORMAT = "bv*[height<=1080]+ba/b[height<=1080]"
-
-# Which of YouTube's own clients to impersonate. Pairing cookies with the TV
-# client invalidates the session, so the authenticated attempt uses a browser
-# client instead.
-CLIENTS_ANONYMOUS = ["tv", "web_safari"]
-CLIENTS_WITH_COOKIES = ["web_safari"]
 
 BOT_CHECK_HINTS = ("not a bot", "sign in to confirm")
 
@@ -40,7 +34,22 @@ COOKIE_PROBLEM_HINTS = (
     "permission denied",
     "no such file",
     "could not find",
+    "unsupported browser",
 )
+
+# In order. The first is yt-dlp's own judgement, which is what the app used
+# before any of this and works most of the time; the rest are escape hatches
+# for when YouTube decides it doesn't like the look of us.
+CLIENT_ATTEMPTS: list[tuple[str, list[str] | None]] = [
+    ("yt-dlp's default", None),
+    ("the TV client", ["tv"]),
+    ("the Safari client", ["web_safari"]),
+    ("the iOS client", ["ios"]),
+]
+
+# Cookies and the TV client cancel each other out, so the authenticated try
+# uses a browser client.
+COOKIE_CLIENTS = ["web_safari"]
 
 
 class DownloadError(RuntimeError):
@@ -54,95 +63,90 @@ def _mentions(error: Exception | None, hints) -> bool:
     return any(hint in message for hint in hints)
 
 
-def _looks_like_a_bot_check(error: Exception | None) -> bool:
+def _is_bot_check(error: Exception | None) -> bool:
     return _mentions(error, BOT_CHECK_HINTS)
 
 
-def _options(settings: dict | None, with_cookies: bool) -> dict:
-    settings = settings or {}
+def _is_cookie_problem(error: Exception | None) -> bool:
+    return _mentions(error, COOKIE_PROBLEM_HINTS)
+
+
+def _options(clients: list[str] | None, browser: str = "") -> dict:
     options = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
         "consoletitle": False,
-        "extractor_args": {
-            "youtube": {
-                "player_client": CLIENTS_WITH_COOKIES if with_cookies else CLIENTS_ANONYMOUS
-            }
-        },
     }
-    if with_cookies:
-        browser = (settings.get("cookies_browser") or "").strip().lower()
-        if browser:
-            options["cookiesfrombrowser"] = (browser,)
+    if clients:
+        options["extractor_args"] = {"youtube": {"player_client": clients}}
+    if browser:
+        options["cookiesfrombrowser"] = (browser,)
     return options
 
 
-def _attempts(settings: dict | None) -> list[bool]:
-    """Anonymous first; add the cookie attempt only if a browser is set."""
+def _plan(settings: dict | None) -> list[tuple[str, dict]]:
+    """The ordered list of (description, yt-dlp options) to try."""
+    plan = [(label, _options(clients)) for label, clients in CLIENT_ATTEMPTS]
+    browser = ((settings or {}).get("cookies_browser") or "").strip().lower()
+    if browser:
+        plan.append((f"{browser}'s cookies", _options(COOKIE_CLIENTS, browser)))
+    return plan
+
+
+def _explain(failures: list[tuple[str, Exception]], settings: dict | None) -> DownloadError:
+    """One sentence worth reading, out of everything that went wrong."""
     browser = ((settings or {}).get("cookies_browser") or "").strip()
-    return [False, True] if browser else [False]
+    errors = [error for _, error in failures]
 
-
-def _explain(
-    anonymous_error: Exception | None,
-    cookie_error: Exception | None,
-    settings: dict | None,
-) -> DownloadError:
-    """Turn whichever attempts failed into one sentence worth reading.
-
-    The cookie attempt runs second, so its error is the most recent — but if it
-    failed because the cookie jar itself could not be opened, that has nothing
-    to do with the video, and reporting it alone hides what YouTube actually
-    said."""
-    browser = ((settings or {}).get("cookies_browser") or "").strip()
-
-    if _mentions(cookie_error, COOKIE_PROBLEM_HINTS):
-        aside = ""
-        if _looks_like_a_bot_check(anonymous_error):
-            aside = " Without cookies, YouTube asked to confirm you're not a bot."
-        elif anonymous_error is not None:
-            aside = f" Without cookies it failed too: {anonymous_error}"
-        return DownloadError(
-            f"The app could not read {browser or 'that browser'}'s cookies. Chrome and Edge "
-            "encrypt them in a way this cannot open on Windows, and they keep the file locked "
-            "while running. In Settings, either switch to Firefox or set it back to no browser."
-            + aside
+    cookie_note = ""
+    if browser and any(_is_cookie_problem(error) for error in errors):
+        cookie_note = (
+            f" (Your {browser} cookies could not be read either — Chrome and Edge encrypt "
+            "theirs in a way this cannot open on Windows, and a browser that isn't installed "
+            "has nothing to read. Set it back to no browser in Settings if it isn't helping.)"
         )
 
-    if _looks_like_a_bot_check(cookie_error):
+    if any(_is_bot_check(error) for error in errors):
         return DownloadError(
-            "YouTube refused the download even with your browser cookies. Wait a few minutes "
-            "and try again, and check you are signed in to YouTube in that browser."
+            "YouTube blocked every way this app knows how to ask, saying it wants to confirm "
+            "you're not a bot. This usually passes on its own after a few minutes — it depends "
+            "on your connection, not on the video." + cookie_note
         )
 
-    if _looks_like_a_bot_check(anonymous_error) and not browser:
-        return DownloadError(
-            "YouTube is asking to confirm you're not a bot. Try again in a few minutes — and if "
-            "it keeps happening, open Settings and point the app at Firefox to borrow its session."
-        )
-
-    return DownloadError(f"Could not read that video: {cookie_error or anonymous_error}")
+    real = next((error for error in errors if not _is_cookie_problem(error)), None)
+    return DownloadError(f"Could not read that video: {real or (errors[0] if errors else 'unknown failure')}")
 
 
-def fetch_metadata(url: str, settings: dict | None = None) -> dict:
+def _note(on_note, message: str) -> None:
+    if on_note:
+        try:
+            on_note(message)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def fetch_metadata(url: str, settings: dict | None = None, on_note=None) -> dict:
     """Title, description and tags of the source video, without downloading
     it — used to name the folder and draft captions."""
-    failures: dict[bool, Exception] = {}
+    failures: list[tuple[str, Exception]] = []
 
-    for with_cookies in _attempts(settings):
+    for label, options in _plan(settings):
         try:
-            with yt_dlp.YoutubeDL(_options(settings, with_cookies)) as ydl:
+            with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as exc:  # noqa: BLE001 - yt-dlp raises a wide range of errors
-            failures[with_cookies] = exc
+            failures.append((label, exc))
+            _note(on_note, f"Asking with {label} — refused.")
             continue
 
         if info is None:
-            failures[with_cookies] = RuntimeError("no video information came back")
+            failures.append((label, RuntimeError("no video information came back")))
             continue
 
+        if failures:
+            _note(on_note, f"Asking with {label} — accepted.")
         return {
             "id": info.get("id") or "",
             "title": info.get("title") or "Clip",
@@ -150,9 +154,11 @@ def fetch_metadata(url: str, settings: dict | None = None) -> dict:
             "tags": list(info.get("tags") or [])[:10],
             "duration": float(info.get("duration") or 0),
             "uploader": info.get("uploader") or "",
+            # remember what worked so the download doesn't start from scratch
+            "_options": options,
         }
 
-    raise _explain(failures.get(False), failures.get(True), settings)
+    raise _explain(failures, settings)
 
 
 def download_source(
@@ -160,6 +166,8 @@ def download_source(
     dest_dir: Path,
     on_progress=None,
     settings: dict | None = None,
+    preferred_options: dict | None = None,
+    on_note=None,
 ) -> Path:
     """Download the full video into dest_dir and return the resulting file.
 
@@ -191,10 +199,17 @@ def download_source(
         except Exception:  # noqa: BLE001
             pass
 
-    failures: dict[bool, Exception] = {}
-    for with_cookies in _attempts(settings):
+    plan = _plan(settings)
+    if preferred_options is not None:
+        # Whatever answered a moment ago is the best bet; keep the rest as backup.
+        plan = [("the same way as before", preferred_options)] + [
+            entry for entry in plan if entry[1] != preferred_options
+        ]
+
+    failures: list[tuple[str, Exception]] = []
+    for label, base_options in plan:
         options = {
-            **_options(settings, with_cookies),
+            **base_options,
             "format": FORMAT,
             "merge_output_format": "mp4",
             "outtmpl": str(dest_dir / "source.%(ext)s"),
@@ -206,7 +221,8 @@ def download_source(
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([url])
         except Exception as exc:  # noqa: BLE001
-            failures[with_cookies] = exc
+            failures.append((label, exc))
+            _note(on_note, f"Downloading with {label} — refused.")
             seen.clear()
             continue
 
@@ -214,8 +230,8 @@ def download_source(
         # files named source.f137.mp4 and the like; if a merge went wrong one
         # of those can survive, and picking it would hand the next stage a
         # clip with no sound.
-        merged = [dest_dir / f"source.{ext}" for ext in ("mp4", "mkv", "webm")]
-        for candidate in merged:
+        for extension in ("mp4", "mkv", "webm"):
+            candidate = dest_dir / f"source.{extension}"
             if candidate.exists():
                 return candidate
 
@@ -226,6 +242,6 @@ def download_source(
         )
         if leftovers:
             return leftovers[0]
-        failures[with_cookies] = RuntimeError("the download finished but produced no video file")
+        failures.append((label, RuntimeError("the download finished but produced no video file")))
 
-    raise _explain(failures.get(False), failures.get(True), settings)
+    raise _explain(failures, settings)

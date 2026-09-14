@@ -84,7 +84,7 @@ def create_clips(job, url: str, options: dict) -> dict:
 
     # -- 1. what are we even working with ------------------------------
     job.update(phase="metadata", percent=0, detail="Reading video details…")
-    meta = fetch_metadata(url, settings)
+    meta = fetch_metadata(url, settings, on_note=job.say)
     job.say(f"Video: {meta['title']}")
     job.update(percent=STAGE_BOUNDS["metadata"][1])
 
@@ -101,6 +101,8 @@ def create_clips(job, url: str, options: dict) -> dict:
             url, work_dir,
             on_progress=lambda p: job.update(percent=scale(p)),
             settings=settings,
+            preferred_options=meta.get("_options"),
+            on_note=job.say,
         )
         job.say(f"Downloaded {source.name} ({source.stat().st_size / 1_048_576:.0f} MB)")
 
