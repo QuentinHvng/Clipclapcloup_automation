@@ -84,7 +84,7 @@ def create_clips(job, url: str, options: dict) -> dict:
 
     # -- 1. what are we even working with ------------------------------
     job.update(phase="metadata", percent=0, detail="Reading video details…")
-    meta = fetch_metadata(url)
+    meta = fetch_metadata(url, settings)
     job.say(f"Video: {meta['title']}")
     job.update(percent=STAGE_BOUNDS["metadata"][1])
 
@@ -97,7 +97,11 @@ def create_clips(job, url: str, options: dict) -> dict:
         # -- 2. download -----------------------------------------------
         scale = phase_scaler(*STAGE_BOUNDS["download"])
         job.update(phase="download", detail="Downloading the source video…")
-        source = download_source(url, work_dir, on_progress=lambda p: job.update(percent=scale(p)))
+        source = download_source(
+            url, work_dir,
+            on_progress=lambda p: job.update(percent=scale(p)),
+            settings=settings,
+        )
         job.say(f"Downloaded {source.name} ({source.stat().st_size / 1_048_576:.0f} MB)")
 
         # -- 3. find the liveliest stretch -----------------------------

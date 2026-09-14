@@ -174,6 +174,32 @@
         </label>
       </div>
 
+      <div class="card">
+        <h2>When YouTube asks to confirm you're not a bot</h2>
+        <p class="muted">
+          YouTube sometimes refuses downloads until it sees a signed-in session. The app already
+          asks in a way that usually avoids this. If it still happens, point it at the browser you
+          watch YouTube in and it will borrow that session.
+        </p>
+        <label class="field">
+          <span class="field-label">Borrow cookies from</span>
+          <select id="set-cookies-browser">
+            <option value="">No browser (default)</option>
+            <option value="firefox">Firefox</option>
+            <option value="chrome">Chrome</option>
+            <option value="edge">Edge</option>
+            <option value="brave">Brave</option>
+            <option value="chromium">Chromium</option>
+            <option value="opera">Opera</option>
+          </select>
+        </label>
+        <p class="muted" style="font-size:.82rem">
+          Firefox works best on Windows — Chrome and Edge lock their cookie database while running,
+          so close the browser first if you pick one of those. Prefer an account you don't mind
+          losing: Google does sometimes flag sessions used this way.
+        </p>
+      </div>
+
       <div class="card" id="tiktok-card">
         <div class="card-head">
           <h2>TikTok account</h2>

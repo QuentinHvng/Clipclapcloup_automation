@@ -77,6 +77,9 @@ DEFAULT_SETTINGS: dict = {
     "overlap": 5,
     "mode": "blur-pad",  # or "crop"
     "burn_part_label": True,
+    # which browser's cookies to borrow when YouTube demands a sign-in
+    # ("" = none, otherwise firefox / chrome / edge / brave / opera / chromium)
+    "cookies_browser": "",
     # captions
     "caption_language": "en",  # "en" or "fr"
     "anthropic_api_key": "",

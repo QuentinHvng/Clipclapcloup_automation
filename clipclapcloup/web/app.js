@@ -106,6 +106,7 @@ function applySettingsToForms() {
   $("burn-part-label").checked = s.burn_part_label !== false;
   $("set-clips-dir").value = s.clips_dir_resolved || "";
   $("set-caption-language").value = s.caption_language || "en";
+  $("set-cookies-browser").value = s.cookies_browser || "";
   $("anthropic-state").textContent = s.anthropic_api_key_set ? "— a key is saved" : "— not set";
 }
 
@@ -449,6 +450,12 @@ $("set-caption-language").addEventListener("change", async (event) => {
   const data = await post("/api/settings", { caption_language: event.target.value });
   state.settings = data.settings;
   toast("Caption language saved");
+});
+
+$("set-cookies-browser").addEventListener("change", async (event) => {
+  const data = await post("/api/settings", { cookies_browser: event.target.value });
+  state.settings = data.settings;
+  toast(event.target.value ? `Will borrow cookies from ${event.target.value}` : "Browser cookies turned off");
 });
 
 $("btn-open-clips").addEventListener("click", () => post("/api/open-folder", {}).catch(() => {}));
